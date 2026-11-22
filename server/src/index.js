@@ -5,7 +5,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { mkdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import authRoutes from './routes/auth.js';
 import visitorRoutes from './routes/visitors.js';
 
@@ -13,21 +14,23 @@ if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required. Copy serve
 if (process.env.JWT_SECRET.length < 32) throw new Error('JWT_SECRET must be at least 32 characters.');
 let localMongo;
 let mongoUri = process.env.MONGODB_URI;
+const serverRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 if (!mongoUri) {
-  const binaryPath = resolve('.data', 'mongodb-binaries');
+  const binaryPath = resolve(serverRoot, '.data', 'mongodb-binaries');
   await mkdir(binaryPath, { recursive: true });
   process.env.MONGOMS_DOWNLOAD_DIR ||= binaryPath;
   const { MongoMemoryServer } = await import('mongodb-memory-server-core');
-  const dataPath = resolve('.data', 'mongodb');
+  const dataPath = resolve(serverRoot, '.data', 'mongodb');
   await mkdir(dataPath, { recursive: true });
   localMongo = await MongoMemoryServer.create({
     binary: { version: '8.0.38' },
     instance: { dbPath: dataPath, dbName: 'visitorx', storageEngine: 'wiredTiger' },
   });
-  mongoUri = localMongo.getUri();
+  mongoUri = localMongo.getUri('visitorx');
   console.log('Started local MongoDB for development; data is saved in server/.data/mongodb.');
 }
 await mongoose.connect(mongoUri);
+console.log(`Connected to MongoDB database: ${mongoose.connection.db.databaseName}`);
 
 const app = express();
 app.disable('x-powered-by');
@@ -52,7 +55,7 @@ app.listen(port, () => console.log(`VisitorX API listening on http://localhost:$
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, async () => {
     await mongoose.disconnect();
-    if (localMongo) await localMongo.stop();
+    if (localMongo) await localMongo.stop({ doCleanup: false });
     process.exit(0);
   });
 }
